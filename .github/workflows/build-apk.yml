@@ -1,4 +1,4 @@
-name: Build NGR Neo APK
+name: Build NGR Neo APK One File
 
 on:
   workflow_dispatch:
@@ -16,21 +16,659 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Show Flutter version
-        run: flutter --version
+      - name: Recreate Flutter project from workflow
+        shell: bash
+        run: |
+          set -e
+          rm -rf android ios web linux macos windows test lib assets pubspec.yaml analysis_options.yaml
+          flutter create . --platforms=android --project-name ngr_neo
+          mkdir -p lib assets
+          cat > pubspec.yaml <<'EOF_PUB'
+name: ngr_neo
+version: 0.1.0+1
+publish_to: "none"
+description: NGR Neo - Liquid Garage OS, Flutter rebuild for Honda Beat FI 2014.
 
-      - name: Generate Android project
-        run: flutter create . --platforms=android
+environment:
+  sdk: ">=3.3.0 <4.0.0"
 
-      - name: Get packages
-        run: flutter pub get
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  shared_preferences: ^2.3.5
 
-      - name: Build debug APK
-        run: flutter build apk --debug
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ngr-neo-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
-          
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/ngr_icon.png
+
+EOF_PUB
+          cat > lib/main.dart <<'EOF_MAIN'
+import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:ui';
+
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const NgrNeoApp());
+}
+
+class NgrNeoApp extends StatelessWidget {
+  const NgrNeoApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'NGR Neo',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: NeoColors.bg,
+        fontFamily: 'Roboto',
+        colorScheme: const ColorScheme.dark(
+          primary: NeoColors.cyan,
+          secondary: NeoColors.blue,
+          surface: NeoColors.card,
+        ),
+      ),
+      home: const NeoRoot(),
+    );
+  }
+}
+
+class NeoColors {
+  static const bg = Color(0xFF05070D);
+  static const bg2 = Color(0xFF08121A);
+  static const card = Color(0x1FFFFFFF);
+  static const cardStrong = Color(0x33FFFFFF);
+  static const border = Color(0x26FFFFFF);
+  static const white = Color(0xFFEFF4FF);
+  static const muted = Color(0xFF8C95A6);
+  static const dim = Color(0xFF5F6878);
+  static const cyan = Color(0xFF5DE6F2);
+  static const blue = Color(0xFF70A6FF);
+  static const green = Color(0xFF39E27D);
+  static const red = Color(0xFFFF6B8A);
+  static const yellow = Color(0xFFFFD56B);
+  static const purple = Color(0xFFA48BFF);
+}
+
+class AppData {
+  double virtualKm;
+  double fuelLiters;
+  double fuelPrice;
+  double kmPerLiter;
+  double moneyBudget;
+  List<Map<String, dynamic>> kmLogs;
+  List<Map<String, dynamic>> fuelLogs;
+  List<Map<String, dynamic>> moneyLogs;
+  List<Map<String, dynamic>> problems;
+  List<Map<String, dynamic>> routes;
+  Map<String, dynamic> serviceDoneKm;
+  Map<String, dynamic> serviceDoneDate;
+
+  AppData({
+    required this.virtualKm,
+    required this.fuelLiters,
+    required this.fuelPrice,
+    required this.kmPerLiter,
+    required this.moneyBudget,
+    required this.kmLogs,
+    required this.fuelLogs,
+    required this.moneyLogs,
+    required this.problems,
+    required this.routes,
+    required this.serviceDoneKm,
+    required this.serviceDoneDate,
+  });
+
+  factory AppData.fresh() {
+    final now = DateTime.now().toIso8601String();
+    return AppData(
+      virtualKm: 0,
+      fuelLiters: 0,
+      fuelPrice: 10000,
+      kmPerLiter: 55,
+      moneyBudget: 250000,
+      kmLogs: [],
+      fuelLogs: [],
+      moneyLogs: [],
+      problems: [],
+      routes: [],
+      serviceDoneKm: {
+        'oli_mesin': 0.0,
+        'oli_gardan': 0.0,
+        'busi': 0.0,
+        'cvt': 0.0,
+      },
+      serviceDoneDate: {
+        'oli_mesin': now,
+        'oli_gardan': now,
+        'busi': now,
+        'cvt': now,
+      },
+    );
+  }
+
+  factory AppData.fromJson(Map<String, dynamic> json) {
+    return AppData(
+      virtualKm: _toDouble(json['virtualKm'], 0),
+      fuelLiters: _toDouble(json['fuelLiters'], 0),
+      fuelPrice: _toDouble(json['fuelPrice'], 10000),
+      kmPerLiter: _toDouble(json['kmPerLiter'], 55),
+      moneyBudget: _toDouble(json['moneyBudget'], 250000),
+      kmLogs: _listMap(json['kmLogs']),
+      fuelLogs: _listMap(json['fuelLogs']),
+      moneyLogs: _listMap(json['moneyLogs']),
+      problems: _listMap(json['problems']),
+      routes: _listMap(json['routes']),
+      serviceDoneKm: Map<String, dynamic>.from(json['serviceDoneKm'] ?? AppData.fresh().serviceDoneKm),
+      serviceDoneDate: Map<String, dynamic>.from(json['serviceDoneDate'] ?? AppData.fresh().serviceDoneDate),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'virtualKm': virtualKm,
+        'fuelLiters': fuelLiters,
+        'fuelPrice': fuelPrice,
+        'kmPerLiter': kmPerLiter,
+        'moneyBudget': moneyBudget,
+        'kmLogs': kmLogs,
+        'fuelLogs': fuelLogs,
+        'moneyLogs': moneyLogs,
+        'problems': problems,
+        'routes': routes,
+        'serviceDoneKm': serviceDoneKm,
+        'serviceDoneDate': serviceDoneDate,
+      };
+
+  static double _toDouble(dynamic value, double fallback) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? fallback;
+    return fallback;
+  }
+
+  static List<Map<String, dynamic>> _listMap(dynamic value) {
+    if (value is List) {
+      return value.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+    }
+    return [];
+  }
+}
+
+class ServiceSpec {
+  final String id;
+  final String name;
+  final IconData icon;
+  final double intervalKm;
+  final int intervalDays;
+  final String note;
+
+  const ServiceSpec(this.id, this.name, this.icon, this.intervalKm, this.intervalDays, this.note);
+}
+
+const serviceSpecs = [
+  ServiceSpec('oli_mesin', 'Oli Mesin', CupertinoIcons.drop_fill, 2000, 60, 'Paling penting buat mesin.'),
+  ServiceSpec('oli_gardan', 'Oli Gardan', CupertinoIcons.gear_alt_fill, 8000, 180, 'Buat area gardan matic.'),
+  ServiceSpec('busi', 'Busi', CupertinoIcons.bolt_fill, 8000, 180, 'Cek kalau susah starter/brebet.'),
+  ServiceSpec('cvt', 'CVT', CupertinoIcons.circle_grid_hex_fill, 8000, 180, 'Cek kalau tarikan berat/getar.'),
+];
+
+class NeoRoot extends StatefulWidget {
+  const NeoRoot({super.key});
+
+  @override
+  State<NeoRoot> createState() => _NeoRootState();
+}
+
+class _NeoRootState extends State<NeoRoot> {
+  int index = 0;
+  AppData data = AppData.fresh();
+  bool loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('ngr_neo_data');
+    if (raw != null) {
+      try {
+        data = AppData.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      } catch (_) {
+        data = AppData.fresh();
+      }
+    }
+    setState(() => loaded = true);
+  }
+
+  Future<void> _save() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ngr_neo_data', jsonEncode(data.toJson()));
+  }
+
+  void _mutate(void Function() run) {
+    setState(run);
+    _save();
+  }
+
+  String _todayKey([DateTime? dt]) {
+    final d = dt ?? DateTime.now();
+    return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
+  bool get inputToday => data.kmLogs.any((e) => e['dateKey'] == _todayKey());
+
+  int get streak {
+    final keys = data.kmLogs.map((e) => '${e['dateKey']}').toSet();
+    var count = 0;
+    var cursor = DateTime.now();
+    if (!keys.contains(_todayKey(cursor))) {
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+    while (keys.contains(_todayKey(cursor))) {
+      count++;
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+    return count;
+  }
+
+  double servicePercent(ServiceSpec spec) {
+    final doneKm = AppData._toDouble(data.serviceDoneKm[spec.id], 0);
+    final kmUsed = math.max(0.0, data.virtualKm - doneKm).toDouble();
+    final kmRemainPct = 1 - (kmUsed / spec.intervalKm);
+    final rawDate = data.serviceDoneDate[spec.id]?.toString();
+    final doneDate = DateTime.tryParse(rawDate ?? '') ?? DateTime.now();
+    final daysUsed = DateTime.now().difference(doneDate).inDays;
+    final dayRemainPct = 1 - (daysUsed / spec.intervalDays);
+    final pct = math.min(kmRemainPct, dayRemainPct) * 100;
+    return pct.clamp(0, 100).toDouble();
+  }
+
+  int get health {
+    final avg = serviceSpecs.map(servicePercent).fold<double>(0, (a, b) => a + b) / serviceSpecs.length;
+    return avg.round().clamp(0, 100);
+  }
+
+  double monthMoney({String? category}) {
+    final now = DateTime.now();
+    return data.moneyLogs.where((e) {
+      final dt = DateTime.tryParse('${e['time']}');
+      final sameMonth = dt != null && dt.month == now.month && dt.year == now.year;
+      final catOk = category == null || e['category'] == category;
+      return sameMonth && catOk;
+    }).fold<double>(0, (sum, e) => sum + AppData._toDouble(e['amount'], 0));
+  }
+
+  void addKm(double km, {String source = 'Daily KM', String note = ''}) {
+    final now = DateTime.now();
+    final double fuelUsed = km <= 0 ? 0.0 : km / math.max(1.0, data.kmPerLiter);
+    _mutate(() {
+      data.virtualKm += km;
+      data.fuelLiters = math.max(0.0, data.fuelLiters - fuelUsed).toDouble();
+      data.kmLogs.insert(0, {
+        'time': now.toIso8601String(),
+        'dateKey': _todayKey(now),
+        'km': km,
+        'source': source,
+        'note': note,
+        'fuelUsed': fuelUsed,
+      });
+    });
+    showNeoSnack(context, km == 0 ? 'Hari ini ditandai libur motor.' : '+${fmt(km)} km masuk. Fuel turun estimasi ${fmt(fuelUsed)} L.');
+  }
+
+  void addFuel(double liters, {String name = 'Pertalite'}) {
+    final now = DateTime.now();
+    final cost = liters * data.fuelPrice;
+    _mutate(() {
+      data.fuelLiters += liters;
+      data.fuelLogs.insert(0, {
+        'time': now.toIso8601String(),
+        'liters': liters,
+        'name': name,
+        'price': data.fuelPrice,
+        'cost': cost,
+      });
+      data.moneyLogs.insert(0, {
+        'time': now.toIso8601String(),
+        'category': 'Fuel',
+        'amount': cost,
+        'note': '$name ${fmt(liters)} L',
+      });
+    });
+    showNeoSnack(context, '$name ${fmt(liters)} L masuk. Range +${fmt(liters * data.kmPerLiter)} km.');
+  }
+
+  void addMoney(String category, double amount, String note) {
+    _mutate(() {
+      data.moneyLogs.insert(0, {
+        'time': DateTime.now().toIso8601String(),
+        'category': category,
+        'amount': amount,
+        'note': note,
+      });
+    });
+    showNeoSnack(context, 'Expense $category Rp${rupiah(amount)} dicatat.');
+  }
+
+  void addProblem(String title, String level, String note) {
+    _mutate(() {
+      data.problems.insert(0, {
+        'time': DateTime.now().toIso8601String(),
+        'title': title,
+        'level': level,
+        'note': note,
+        'status': 'Dipantau',
+      });
+    });
+    showNeoSnack(context, 'Problem dicatat buat Kang Rusdi.');
+  }
+
+  void markServiceDone(ServiceSpec spec) {
+    _mutate(() {
+      data.serviceDoneKm[spec.id] = data.virtualKm;
+      data.serviceDoneDate[spec.id] = DateTime.now().toIso8601String();
+      data.moneyLogs.insert(0, {
+        'time': DateTime.now().toIso8601String(),
+        'category': 'Service',
+        'amount': 0,
+        'note': '${spec.name} selesai',
+      });
+    });
+    showNeoSnack(context, '${spec.name} direset ke 100%.');
+  }
+
+  String rusdiScan() {
+    final nearest = [...serviceSpecs]..sort((a, b) => servicePercent(a).compareTo(servicePercent(b)));
+    final fuelRange = data.fuelLiters * data.kmPerLiter;
+    final money = monthMoney();
+    final buffer = StringBuffer();
+    if (!inputToday) buffer.write('Hari ini belum input KM. ');
+    if (fuelRange < 20) buffer.write('Bensin mepet, isi dulu kalau mau jauh. ');
+    buffer.write('Service paling dekat: ${nearest.first.name} ${servicePercent(nearest.first).round()}%. ');
+    if (money > data.moneyBudget * 0.8) {
+      buffer.write('Money bulan ini udah tinggi, tahan modif dulu.');
+    } else {
+      buffer.write('Money bulan ini masih relatif aman.');
+    }
+    return buffer.toString();
+  }
+
+  void openSettings() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SettingsSheet(
+        data: data,
+        onUpdate: (next) => _mutate(() => data = next),
+      ),
+    );
+  }
+
+  void openQuickAdd() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => QuickAddSheet(
+        addKm: addKm,
+        addFuel: addFuel,
+        addMoney: addMoney,
+        addProblem: addProblem,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!loaded) {
+      return const Scaffold(body: Center(child: CupertinoActivityIndicator()));
+    }
+
+    final pages = [
+      HomePage(
+        data: data,
+        health: health,
+        streak: streak,
+        inputToday: inputToday,
+        servicePercent: servicePercent,
+        monthMoney: monthMoney,
+        addKm: addKm,
+        addFuel: addFuel,
+        addMoney: addMoney,
+        markServiceDone: markServiceDone,
+        openSettings: openSettings,
+        rusdiScan: rusdiScan,
+      ),
+      MapsPage(
+        data: data,
+        addKm: addKm,
+        saveRoute: (route) => _mutate(() => data.routes.insert(0, route)),
+        rusdiScan: rusdiScan,
+      ),
+      FuelPage(data: data, addFuel: addFuel),
+      MoneyPage(data: data, addMoney: addMoney, monthMoney: monthMoney),
+      AssistPage(data: data, addProblem: addProblem, rusdiScan: rusdiScan),
+    ];
+
+    return Scaffold(
+      body: NeoBackground(
+        child: Stack(
+          children: [
+            SafeArea(bottom: false, child: pages[index]),
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 14,
+              child: LiquidNavBar(
+                index: index,
+                onTap: (i) => setState(() => index = i),
+              ),
+            ),
+            Positioned(
+              right: 20,
+              bottom: 108,
+              child: GestureDetector(
+                onTap: openQuickAdd,
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(colors: [NeoColors.blue, NeoColors.cyan]),
+                    boxShadow: [BoxShadow(color: NeoColors.cyan.withOpacity(.28), blurRadius: 32, offset: const Offset(0, 12))],
+                  ),
+                  child: const Icon(CupertinoIcons.add, size: 36, color: Colors.white),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class NeoBackground extends StatelessWidget {
+  final Widget child;
+  const NeoBackground({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF05070D), Color(0xFF06111A), Color(0xFF03050A)],
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(top: -120, left: -80, child: _Blob(color: NeoColors.blue.withOpacity(.18), size: 260)),
+          Positioned(top: 180, right: -100, child: _Blob(color: NeoColors.cyan.withOpacity(.12), size: 260)),
+          Positioned(bottom: 120, left: -120, child: _Blob(color: NeoColors.purple.withOpacity(.10), size: 280)),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _Blob extends StatelessWidget {
+  final Color color;
+  final double size;
+  const _Blob({required this.color, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+        boxShadow: [BoxShadow(color: color, blurRadius: 90, spreadRadius: 30)],
+      ),
+    );
+  }
+}
+
+class GlassCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsets padding;
+  final double radius;
+  final Color? color;
+  final VoidCallback? onTap;
+  const GlassCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(20),
+    this.radius = 28,
+    this.color,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final card = ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            color: color ?? Colors.white.withOpacity(.075),
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(color: Colors.white.withOpacity(.10)),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(.25), blurRadius: 30, offset: const Offset(0, 16))],
+          ),
+          child: child,
+        ),
+      ),
+    );
+    if (onTap == null) return card;
+    return GestureDetector(onTap: onTap, child: card);
+  }
+}
+
+class PageFrame extends StatelessWidget {
+  final Widget child;
+  const PageFrame({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 126),
+      physics: const BouncingScrollPhysics(),
+      child: child,
+    );
+  }
+}
+
+class NeoHeader extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final VoidCallback? onSettings;
+  const NeoHeader({super.key, required this.title, required this.subtitle, this.onSettings});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Image.asset('assets/ngr_icon.png', width: 54, height: 54),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -.2)),
+              const SizedBox(height: 3),
+              Text(subtitle, style: const TextStyle(fontSize: 14, color: NeoColors.muted, fontWeight: FontWeight.w500)),
+            ],
+          ),
+        ),
+        if (onSettings != null)
+          GlassCard(
+            padding: EdgeInsets.zero,
+            radius: 26,
+            onTap: onSettings,
+            child: const SizedBox(width: 58, height: 58, child: Icon(CupertinoIcons.gear_alt, size: 25)),
+          ),
+      ],
+    );
+  }
+}
+
+class HomePage extends StatelessWidget {
+  final AppData data;
+  final int health;
+  final int streak;
+  final bool inputToday;
+  final double Function(ServiceSpec) servicePercent;
+  final double Function({String? category}) monthMoney;
+  final void Function(double, {String source, String note}) addKm;
+  final void Function(double, {String name}) addFuel;
+  final void Function(String, double, String) addMoney;
+  final void Function(ServiceSpec) markServiceDone;
+  final VoidCallback openSettings;
+  final String Function() rusdiScan;
+
+  const HomePage({
+    super.key,
+    required this.data,
+    required this.health,
+    required this.streak,
+    required this.inputToday,
+    required this.servicePercent,
+    required this.monthMoney,
+    required this.addKm,
+    required this.addFuel,
+    required this.addMoney,
+    required this.markServiceDone,
+    required this.openSettings,
+    required this.rusdiScan,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final range = data.fue
